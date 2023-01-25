@@ -1,0 +1,84 @@
+---
+title: "Data Science Submission"
+author: "MMorse"
+date: "1/24/2023"
+output: html_document
+---
+
+This code is from a chapter of my dissertation which aims to use a Bayesian hierarchical occupancy model to predict the locations and identities of false negatives in a simulated observed species community. I generated 2000 simulated data sets. In each simulated data set, there were 10 species at 60 sites, with 4 site traits (including an intercept), and 3 replicate surveys. After the occupancy model fit the data, there were 2 methods that I use to calculate the false negative probabilities. The first method extracted the z parameter (true presence/absence 1/0) posterior samples from the occupancy model. The mean of the z posterior gave us the probability of a false negative. The second method extracted the psi (probability of occurrence) and p (probability of detection) parameter posterior samples, and then used Bayes theorem to calculate the probability of a false negative given those parameter values. This chunk of code demonstrates the second method. I then illustrate the results using a heatmap of the false negative probabilities estimated by each method.
+
+
+```{r}
+#calculating probability of a false negative using estimated p and psi for many p and psis (aka occupancy model posterior)
+#many psi and p columns
+
+n.rows <- 500 #number of posterior samples for each parameter ( or a subset of them)
+n.cols <- 100 
+n.parms <-600 # number posterior p and psis extracted from the model (#species * #sites)
+
+psi.matrix <- bind.posterior.psi[1:n.rows,]
+p.matrix <- bind.posterior.p[1:n.rows,] 
+
+z.samples <- list() # represents the true state of the system (truly present or absent 1/0)
+y.samples <- list() # represents the observed data (detected or non-detected 1/0)
+y.matrix <- list() 
+
+for (j in seq(n.parms)){
+
+z <- lapply(psi.matrix[,j], rbern, n = n.cols)
+z.samples[[j]] <- matrix(unlist(z),ncol = n.cols , byrow = TRUE)
+
+y.samples[[j]] <- lapply(p.matrix[,j] * z.samples[[j]], rbern, n = 1)
+y.matrix [[j]] <- matrix(unlist(y.samples[[j]]), ncol = n.cols)
+}
+
+empty.sum <- list()
+total.sum <- list()
+n.fn <- list()
+fn.prob.empty <- list()
+fn.prob.total <- list()
+
+for( j in seq(n.parms)){
+  empty.sum[[j]] <- matrix(data = NA, nrow = n.rows)
+  total.sum[[j]] <- matrix(data = NA, nrow = n.rows)
+  n.fn[[j]] <- matrix(data = NA, nrow = n.rows)
+  fn.prob.empty[[j]] <- matrix(data = NA, nrow = n.rows)
+  fn.prob.total[[j]] <- matrix(data = NA, nrow = n.rows)
+  
+  for(i in seq(n.rows)){
+    empty.sum[[j]][i] <- length(y.matrix[[j]][i,]) - sum(y.matrix[[j]][i,])
+    total.sum[[j]][i] <- length(y.matrix[[j]][i,])
+    
+    fn.matrix <- ifelse(z.samples[[j]][i,] - y.matrix[[j]][i,] > .9,1,0)
+    n.fn[[j]][i] <- sum(fn.matrix)
+    
+    fn.prob.empty[[j]][i] <- n.fn[[j]][i] / empty.sum[[j]][i] #use Bayes theorem to calculate the probability of a false negative of an undetected species
+    fn.prob.total[[j]][i] <- n.fn[[j]][i] / total.sum[[j]][i] #use Bayes theorem to calculate the probability of a false negative of a species
+    
+    }
+}
+
+#create calculated false negative probability heatmap
+calc.fn <- matrix(unlist(fn.prob.total), nrow = 500)
+calc.fn.mean <- matrix(colMeans(calc.fn), ncol = 60, nrow = 10)
+heatmap(calc.fn.mean, Rowv = NA, Colv = NA, scale = 'none')
+
+#add false negative probabilities to the observation matrix
+observation <- obs.matrix[[2000]] # the observed matrix (1 for detected/0 for nondetected) for the 2000th simulated dataset
+mean.obs<- (observation[,,1] + observation[,,2] + observation[,,3]) # observation is an array with dimensions 60 x 10 x 3 so this takes that average observation for all replicates
+observation.matrix <- ifelse(mean.obs >0,1,0)
+
+plus <- observation.matrix + calc.fn.mean
+
+calculated.community <- ifelse(plus>1,1,plus)
+
+#create heatmap illustrating the observed data and calculated false negative probabilities from Bayes theorem and occupancy model estimated psi and p
+heatmap(calculated.community, Rowv = NA, Colv = NA, scale = 'none')
+
+#extracts z posterior samples from the hierarchical occupancy model object
+z.posterior <- MSOM.sim.parasites$z.samples   
+mean.z <- matrix(colMeans(z.posterior), ncol = 60, nrow = 10) 
+
+#creates heatmap illustrating the observed data and estimated false negative probabilities from the occupancy model
+heatmap(mean.z, Rowv = NA, Colv = NA, scale = 'none')
+```
